@@ -3,32 +3,40 @@ from discord.ext import commands
 import os
 from dotenv import load_dotenv
 
-# 1. 在這裡讀取 .env 檔案
+# 讀取環境變數 (TOKEN 放在 .env 檔)
 load_dotenv()
-
-# 2. 在這裡取得 Token
 TOKEN = os.getenv('DISCORD_TOKEN')
 
-# 設定機器人權限
+# 設定 Intent (這是機器人讀取訊息所需的權限)
 intents = discord.Intents.default()
 intents.message_content = True 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 導入你剛剛設計的按鈕類別
+# 按鈕類別
 class AttendanceView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)
-    
-    @discord.ui.button(label="開始工作", style=discord.ButtonStyle.green, custom_id="start_work")
-    async def start_work(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(f"✅ {interaction.user.display_name} 開始剪輯了！", ephemeral=True)
+        super().__init__(timeout=None) # 讓按鈕永遠有效
 
-# 機器人啟動時觸發
+    @discord.ui.button(label="開始剪輯", style=discord.ButtonStyle.green, custom_id="start_work")
+    async def start_work(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(f"🚀 {interaction.user.display_name} 開始工作了！", ephemeral=True)
+        # 這裡未來會接 Notion API
+
+# 招喚指令
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setup(ctx):
+    embed = discord.Embed(
+        title="🎬 影片製作工作台",
+        description="點擊下方按鈕以開始或回報進度。",
+        color=discord.Color.blue()
+    )
+    await ctx.send(embed=embed, view=AttendanceView())
+
 @bot.event
 async def on_ready():
-    # 3. 在這裡註冊你的持久化按鈕 (重要！)
+    # 重新載入按鈕邏輯，確保重啟後按鈕依然有效
     bot.add_view(AttendanceView())
-    print(f'機器人已登入為 {bot.user}')
+    print(f'機器人已上線: {bot.user}')
 
-# 4. 在這裡啟動機器人 (Token 的最後歸宿)
 bot.run(TOKEN)
