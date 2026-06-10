@@ -130,8 +130,8 @@ async def work(ctx):
     if not (ctx.author.guild_permissions.administrator):
         return await ctx.send("你沒有權限使用此指令。")
         
-    # 乾乾淨淨：只在當前頻道發送紅色設定按鈕，不留任何多餘的提示文字或私訊
-    await ctx.send(view=AdminSetupView())
+    # 發送一個紅色的管理員按鈕
+    await ctx.send("請點擊下方按鈕以輸入今天的雲端硬碟網址：", view=AdminSetupView())
     await ctx.message.delete()  # 刪除原指令 !work 字串，保持頻道乾淨
 
 @bot.event
