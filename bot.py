@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 MY_USER_ID = 1150359752359038986  # ⚠️ 請將此處改成你的 Discord ID，用於接收私訊
+EDITOR_ROLE_ID = 1492191110477516912  # ⚠️ 請將此處換成你的真實剪輯師身分組 ID
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -35,15 +36,18 @@ class AttendanceView(discord.ui.View):
         await interaction.response.send_modal(FinishModal())
 
 @bot.command()
-async def work(ctx, role: discord.Role = None):
-    # 用法: !work @剪輯師
+async def work(ctx):
+    # 自動抓取伺服器中的剪輯師身分組
+    role = ctx.guild.get_role(EDITOR_ROLE_ID)
+    
     if not (ctx.author.guild_permissions.administrator):
         return await ctx.send("你沒有權限使用此指令。")
     
     embed = discord.Embed(title="🎬 今日剪輯任務", description="請各位剪輯師開始打卡工作", color=discord.Color.blue())
     embed.add_field(name="📁 素材雲端連結 1", value="[點擊此處取得素材](https://your-drive-link-1.com)", inline=False)
     
-    msg = f"{role.mention if role else ''}"
+    # 判斷是否有找到該身分組，有的話就標記，沒有就顯示無指定
+    msg = f"{role.mention if role else '未設定剪輯師身分組'}"
     await ctx.send(content=msg, embed=embed, view=AttendanceView())
 
 @bot.event
