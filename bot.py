@@ -37,40 +37,74 @@ class FinishModal(discord.ui.Modal, title='回報剪輯完成'):
     async def on_submit(self, interaction: discord.Interaction):
         owner = await interaction.client.fetch_user(MY_USER_ID)
         await owner.send(f"✅ **{interaction.user.display_name} 已完成剪輯！**\n🔗 連結: {self.link.value}")
-        await interaction.response.send_message(f"已回報完成給老闆！", ephemeral=True)
+        
+        # 當按下完成時，修改原本頻道的 Embed 狀態
+        finished_embed = discord.Embed(title="🎬 今日剪輯任務", description="本期剪輯任務已結束！", color=discord.Color.secondary())
+        finished_embed.add_field(name="狀態", value="✅ 剪輯師已回報完成，辛苦了！", inline=False)
+        
+        # 將原本的按鈕全部停用（禁用），變成不能再點擊的狀態
+        old_view = discord.ui.View.from_message(interaction.message)
+        for item in old_view.children:
+            item.disabled = True
+            
+        await interaction.response.edit_message(embed=finished_embed, view=old_view)
+        await interaction.followup.send("已回報完成給老闆！", ephemeral=True)
 
 class AttendanceView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, drive_link: str = ""):
         super().__init__(timeout=None)
+        self.drive_link = drive_link  # 儲存老闆輸入的網址
 
     @discord.ui.button(label="開始剪輯", style=discord.ButtonStyle.green, custom_id="start_work")
     async def start_work(self, interaction: discord.Interaction, button: discord.ui.Button):
         owner = await interaction.client.fetch_user(MY_USER_ID)
         await owner.send(f"🚀 **{interaction.user.display_name} 開始剪輯了！**")
-        await interaction.response.send_message("已通知老闆你開始工作了！", ephemeral=True)
+        
+        # 按下開始剪輯後，才私密顯示網址給該剪輯師
+        msg = f"✅ 已通知老闆你開始工作了！\n📁 **今日素材雲端連結：** {self.drive_link}"
+        await interaction.response.send_message(msg, ephemeral=True)
 
     @discord.ui.button(label="完成任務", style=discord.ButtonStyle.primary, custom_id="finish_work")
     async def finish_work(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(FinishModal())
 
+# 新增：給老闆填寫素材網址的彈出視窗
+class SetupModal(discord.ui.Modal, title='發布今日剪輯任務'):
+    link = discord.ui.TextInput(label='請輸入今日素材雲端連結 1', style=discord.TextStyle.short, placeholder='https://drive.google.com/...', required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        role = interaction.guild.get_role(EDITOR_ROLE_ID)
+        
+        embed = discord.Embed(title="🎬 今日剪輯任務", description="請各位剪輯師開始打卡工作", color=discord.Color.blue())
+        embed.add_field(name="狀態", value="⏳ 等待剪輯師點擊「開始剪輯」取得素材", inline=False)
+        
+        msg = f"{role.mention if role else '未設定剪輯師身分組'}"
+        # 把輸入的網址帶進去 View 裡面
+        await interaction.response.send_message(content=msg, embed=embed, view=AttendanceView(drive_link=self.link.value))
+
+# 老闆專用的啟動檢視按鈕
+class AdminSetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        
+    @discord.ui.button(label="點擊設定今日素材網址", style=discord.ButtonStyle.danger)
+    async def admin_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("你沒有權限使用此按鈕。", ephemeral=True)
+        await interaction.response.send_modal(SetupModal())
+
 @bot.command()
 async def work(ctx):
-    # 自動抓取伺服器中的剪輯師身分組
-    role = ctx.guild.get_role(EDITOR_ROLE_ID)
-    
     if not (ctx.author.guild_permissions.administrator):
         return await ctx.send("你沒有權限使用此指令。")
-    
-    embed = discord.Embed(title="🎬 今日剪輯任務", description="請各位剪輯師開始打卡工作", color=discord.Color.blue())
-    embed.add_field(name="📁 素材雲端連結 1", value="[點擊此處取得素材](https://your-drive-link-1.com)", inline=False)
-    
-    # 判斷是否有找到該身分組，有的話就標記，沒有就顯示無指定
-    msg = f"{role.mention if role else '未設定剪輯師身分組'}"
-    await ctx.send(content=msg, embed=embed, view=AttendanceView())
+        
+    # 發送一個暫時的管理員按鈕，讓你點擊彈出視窗
+    await ctx.send("請點擊下方按鈕以輸入今天的雲端硬碟網址：", view=AdminSetupView(), delete_after=60)
+    await ctx.message.delete()  # 刪除原指令字串，保持頻道乾淨
 
 @bot.event
 async def on_ready():
-    bot.add_view(AttendanceView())
+    bot.add_view(AttendanceView())  # 注意：這裡不要傳參數，保持預設空值
     print(f'機器人已上線: {bot.user}')
 
 # 在機器人登入前先把虛擬網頁跑起來
