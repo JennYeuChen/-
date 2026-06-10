@@ -2,11 +2,29 @@ import discord
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
+from flask import Flask
+from threading import Thread
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 MY_USER_ID = 1150359752359038986  # ⚠️ 請將此處改成你的 Discord ID，用於接收私訊
 EDITOR_ROLE_ID = 1492191110477516912  # ⚠️ 請將此處換成你的真實剪輯師身分組 ID
+
+# 建立一個簡單的網頁伺服器，防止 Render 睡眠
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run_flask():
+    # Render 會自動提供 PORT 環境變換，讀不到就預設 8080
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -54,5 +72,8 @@ async def work(ctx):
 async def on_ready():
     bot.add_view(AttendanceView())
     print(f'機器人已上線: {bot.user}')
+
+# 在機器人登入前先把虛擬網頁跑起來
+keep_alive()
 
 bot.run(TOKEN)
