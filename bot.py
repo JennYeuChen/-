@@ -89,51 +89,50 @@ class AttendanceView(discord.ui.View):
 class SetupModal(discord.ui.Modal, title='發布今日剪輯任務'):
     link = discord.ui.TextInput(label='請輸入今日素材雲端連結 1', style=discord.TextStyle.short, placeholder='https://drive.google.com/...', required=True)
 
-    def __init__(self, target_channel_id=None):
+    # 讓 Modal 在建立時，把紅色按鈕那則訊息記下來
+    def __init__(self, setup_message: discord.Message):
         super().__init__(timeout=None)
-        self.target_channel_id = target_channel_id
+        self.setup_message = setup_message
 
     async def on_submit(self, interaction: discord.Interaction):
-        role = interaction.guild.get_role(EDITOR_ROLE_ID)
+        # 1. 優先回應 Discord（關閉彈窗，避免畫面顯示錯誤）
+        await interaction.response.defer(ephemeral=True)
         
-        # 只保留標題與敘述，畫面更乾淨
+        # 2. 刪除紅色的設定按鈕訊息
+        try:
+            await self.setup_message.delete()
+        except Exception as e:
+            print(f"刪除設定按鈕訊息失敗: {e}")
+
+        # 3. 發送正式的通知剪輯師嵌入訊息
+        role = interaction.guild.get_role(EDITOR_ROLE_ID)
         embed = discord.Embed(title="🎬 今日剪輯任務", description="請各位剪輯師開始打卡工作", color=discord.Color.blue())
         msg = f"{role.mention if role else '未設定剪輯師身分組'}"
         
-        # 先跟 Discord 回應「已成功設定」，關閉輸入視窗
-        await interaction.response.send_message("任務發布成功！", ephemeral=True)
+        # 使用 channel.send 發送，確保成為一則完全獨立、公開且能正常運作的新訊息
+        await interaction.channel.send(content=msg, embed=embed, view=AttendanceView(drive_link=self.link.value))
+
+# 老闆專用的啟動檢視按鈕
+class AdminSetupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
         
-        # 改用 channel.send，這樣打卡台才會「公開」出現在頻道中並成功 @身分組
-        target_channel = interaction.channel
-        if self.target_channel_id:
-            target_channel = interaction.guild.get_channel(self.target_channel_id)
+    @discord.ui.button(label="點擊設定今日素材網址", style=discord.ButtonStyle.danger)
+    async def admin_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("你沒有權限使用此按鈕。", ephemeral=True)
         
-        await target_channel.send(content=msg, embed=embed, view=AttendanceView(drive_link=self.link.value))
+        # 把當前的訊息 (interaction.message) 傳進 Modal 裡
+        await interaction.response.send_modal(SetupModal(setup_message=interaction.message))
 
 @bot.command()
 async def work(ctx):
     if not (ctx.author.guild_permissions.administrator):
-        return await ctx.message.delete()
+        return await ctx.send("你沒有權限使用此指令。")
         
-    await ctx.message.delete() # 刪除 !work
-    
-    # 建立一個專門傳送到你私訊的 View
-    class DMSetupView(discord.ui.View):
-        def __init__(self, channel_id):
-            super().__init__(timeout=60)
-            self.channel_id = channel_id # 記錄原本要發放任務的頻道
-            
-        @discord.ui.button(label="點擊設定今日素材網址", style=discord.ButtonStyle.danger)
-        async def admin_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-            # 把原本頻道的 ID 傳給 Modal，讓它知道等一下要把打卡台發去哪裡
-            await interaction.response.send_modal(SetupModal(target_channel_id=self.channel_id))
-
-    # 機器人直接私訊你，不會在公眾頻道留下任何設定痕跡！
-    try:
-        await ctx.author.send("🎬 請在下方設定今天的剪輯任務：", view=DMSetupView(ctx.channel.id))
-    except discord.Forbidden:
-        # 如果你關閉了伺服器私訊，則退回頻道發送
-        await ctx.send("請開啟私訊功能，或檢查機器人權限。", delete_after=5)
+    # 發送一個紅色的管理員按鈕
+    await ctx.send("請點擊下方按鈕以輸入今天的雲端硬碟網址：", view=AdminSetupView())
+    await ctx.message.delete()  # 刪除原指令 !work 字串，保持頻道乾淨
 
 @bot.event
 async def on_ready():
