@@ -173,8 +173,27 @@ async def work(ctx):
 
 @bot.event
 async def on_ready():
-    # 保持完全乾淨，不加載任何預設的空 View
     print(f'機器人已上線: {bot.user}')
+    
+    # 新增：機器人重新部署上線後，自動發送通知並 @ 你
+    try:
+        # 1. 抓取你的使用者物件
+        owner = await bot.fetch_user(MY_USER_ID)
+        
+        # 2. 設定你要接收通知的 Discord 頻道 ID（請將下方的 123456789 換成你當前工作頻道的 ID）
+        # 提示：對著你的文字頻道按右鍵 -> 複製 ID
+        NOTIFICATION_CHANNEL_ID = 123456789012345678  
+        
+        channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+        if channel:
+            # 在指定頻道發送通知並標記你
+            await channel.send(f"🚀 {owner.mention} 機器人已重新部署完成並成功上線！")
+        else:
+            # 如果找不到頻道，改用私訊通知你
+            await owner.send("🚀 機器人已重新部署完成並成功上線！")
+            
+    except Exception as e:
+        print(f"發送上線通知時發生錯誤: {e}")
 
 # 在機器人登入前先把虛擬網頁跑起來
 keep_alive()
