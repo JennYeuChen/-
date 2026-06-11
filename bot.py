@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import os
+import asyncio
 from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
@@ -34,34 +35,32 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 class FinishModal(discord.ui.Modal, title='回報剪輯完成'):
     link = discord.ui.TextInput(label='請輸入完成後的雲端連結', style=discord.TextStyle.short, placeholder='https://drive.google.com/...', required=True)
 
-    # 讓 Modal 在建立時，可以把當前的 message 記下來
-    def __init__(self, original_message: discord.Message):
+    # 調整：新增接收 view_obj 參數
+    def __init__(self, original_message: discord.Message, view_obj: discord.ui.View):
         super().__init__(timeout=None)
         self.original_message = original_message
+        self.view_obj = view_obj
 
     async def on_submit(self, interaction: discord.Interaction):
-        # 1. 優先回應 Discord，避免互動超時（通知剪輯師已送出）
         await interaction.response.send_message("已回報完成給老闆！", ephemeral=True)
 
-        # 2. 私訊通知老闆
         owner = await interaction.client.fetch_user(MY_USER_ID)
         await owner.send(f"✅ **{interaction.user.display_name} 已完成剪輯！**\n🔗 連結: {self.link.value}")
         
-        # 3. 安全地修改頻道中原本的 Embed 狀態
+        # 新增：把狀態標記為已完成，這樣等一下計時器到了就不會亂催稿
+        self.view_obj.is_finished = True
+        
         try:
-            # 修改後：直接把結束訊息寫在 description，不使用 field
             finished_embed = discord.Embed(
                 title="🎬 今日剪輯任務",
                 description="✅ 本期剪輯任務已結束，辛苦了！",
                 color=discord.Color.secondary()
             )
             
-            # 取得原本的按鈕並全部停用
             old_view = discord.ui.View.from_message(self.original_message)
             for item in old_view.children:
                 item.disabled = True
                 
-            # 使用原本的 message 物件直接做 edit
             await self.original_message.edit(embed=finished_embed, view=old_view)
         except Exception as e:
             print(f"修改頻道訊息時發生錯誤: {e}")
@@ -70,47 +69,64 @@ class AttendanceView(discord.ui.View):
     def __init__(self, drive_link: str = ""):
         super().__init__(timeout=None)
         self.drive_link = drive_link  # 儲存老闆輸入的網址
+        self.is_finished = False      # 新增：用來記錄這項任務是不是完成了
 
     @discord.ui.button(label="開始剪輯", style=discord.ButtonStyle.green, custom_id="start_work")
     async def start_work(self, interaction: discord.Interaction, button: discord.ui.Button):
         owner = await interaction.client.fetch_user(MY_USER_ID)
         await owner.send(f"🚀 **{interaction.user.display_name} 開始剪輯了！**")
         
-        # 按下開始剪輯後，才私密顯示網址給該剪輯師
         msg = f"✅ 已通知老闆你開始工作了！\n📁 **今日素材雲端連結：** {self.drive_link}"
         await interaction.response.send_message(msg, ephemeral=True)
 
     @discord.ui.button(label="完成任務", style=discord.ButtonStyle.primary, custom_id="finish_work")
     async def finish_work(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 把當下的互動訊息 (interaction.message) 傳進 Modal 裡
-        await interaction.response.send_modal(FinishModal(original_message=interaction.message))
+        # 新增：把 self（當前的 View 物件）也傳進 Modal，方便更新狀態
+        await interaction.response.send_modal(FinishModal(original_message=interaction.message, view_obj=self))
 
-# 給老闆填寫素材網址的彈出視窗
+# 給老闆填寫素材網址與時間的彈出視窗
 class SetupModal(discord.ui.Modal, title='發布今日剪輯任務'):
     link = discord.ui.TextInput(label='請輸入今日素材雲端連結 1', style=discord.TextStyle.short, placeholder='https://drive.google.com/...', required=True)
+    # 新增：要求輸入限時分鐘數
+    time_limit = discord.ui.TextInput(label='請輸入限時時間（單位：分鐘）', style=discord.TextStyle.short, placeholder='例如: 120', required=True)
 
-    # 讓 Modal 在建立時，把紅色按鈕那則訊息記下來
     def __init__(self, setup_message: discord.Message):
         super().__init__(timeout=None)
         self.setup_message = setup_message
 
     async def on_submit(self, interaction: discord.Interaction):
-        # 1. 優先回應 Discord（關閉彈窗，避免畫面顯示錯誤）
         await interaction.response.defer(ephemeral=True)
         
-        # 2. 刪除紅色的設定按鈕訊息
         try:
             await self.setup_message.delete()
         except Exception as e:
             print(f"刪除設定按鈕訊息失敗: {e}")
 
-        # 3. 發送正式的通知剪輯師嵌入訊息
+        # 檢查輸入的時間是不是數字，如果不是就預設 60 分鐘
+        try:
+            minutes = int(self.time_limit.value)
+        except ValueError:
+            minutes = 60
+
         role = interaction.guild.get_role(EDITOR_ROLE_ID)
-        embed = discord.Embed(title="🎬 今日剪輯任務", description="請各位剪輯師開始打卡工作", color=discord.Color.blue())
+        # 在 description 順便加上限時提示，讓剪輯師知道
+        embed = discord.Embed(title="🎬 今日剪輯任務", description=f"請各位剪輯師開始打卡工作\n⏳ **本期任務限時: {minutes} 分鐘**", color=discord.Color.blue())
         msg = f"{role.mention if role else '未設定剪輯師身分組'}"
         
-        # 使用 channel.send 發送，確保成為一則完全獨立、公開且能正常運作的新訊息
-        await interaction.channel.send(content=msg, embed=embed, view=AttendanceView(drive_link=self.link.value))
+        # 建立打卡 View
+        attendance_view = AttendanceView(drive_link=self.link.value)
+        await interaction.channel.send(content=msg, embed=embed, view=attendance_view)
+
+        # 新增背景計時功能：時間到了自動檢查是否需要催促
+        async def check_timer(target_channel, role_obj, view: AttendanceView, delay_minutes: int):
+            await asyncio.sleep(delay_minutes * 60)  # 轉換成秒數並等待
+            # 如果時間到了，任務還沒被標記成完成，就發送催促訊息
+            if not view.is_finished:
+                mention_msg = f"⚠️ {role_obj.mention if role_obj else '@剪輯師'} 時間已經過了 {delay_minutes} 分鐘！請儘速完成任務並點擊完成回報！"
+                await target_channel.send(mention_msg)
+
+        # 啟動背景非同步計時任務，不會卡住機器人當前的運作
+        asyncio.create_task(check_timer(interaction.channel, role, attendance_view, minutes))
 
 # 老闆專用的啟動檢視按鈕
 class AdminSetupView(discord.ui.View):
@@ -130,8 +146,8 @@ async def work(ctx):
     if not (ctx.author.guild_permissions.administrator):
         return await ctx.send("你沒有權限使用此指令。")
         
-    # 發送一個紅色的管理員按鈕
-    await ctx.send("請點擊下方按鈕以輸入今天的雲端硬碟網址：", view=AdminSetupView())
+    # 乾乾淨淨：只在當前頻道發送紅色設定按鈕，不留任何多餘的提示文字或私訊
+    await ctx.send(view=AdminSetupView())
     await ctx.message.delete()  # 刪除原指令 !work 字串，保持頻道乾淨
 
 @bot.event
