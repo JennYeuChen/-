@@ -71,15 +71,17 @@ class AttendanceView(discord.ui.View):
         self.drive_link = drive_link  # 儲存老闆輸入的網址
         self.is_finished = False      # 記錄這項任務是不是完成了
 
-    @discord.ui.button(label="開始剪輯", style=discord.ButtonStyle.green) # 移除 custom_id
+    # 關鍵修正：加上固定的 custom_id
+    @discord.ui.button(label="開始剪輯", style=discord.ButtonStyle.green, custom_id="start_work_button")
     async def start_work(self, interaction: discord.Interaction, button: discord.ui.Button):
         owner = await interaction.client.fetch_user(MY_USER_ID)
-        await owner.send(f"🚀 **{interaction.user.display_name} 開始剪輯了！**")
+        await owner.send(f"🚀 **{interaction.user.display_name} 開始剪輯了！")
         
         msg = f"✅ 已通知老闆你開始工作了！\n📁 **今日素材雲端連結：** {self.drive_link}"
         await interaction.response.send_message(msg, ephemeral=True)
 
-    @discord.ui.button(label="完成任務", style=discord.ButtonStyle.primary) # 移除 custom_id
+    # 關鍵修正：加上固定的 custom_id
+    @discord.ui.button(label="完成任務", style=discord.ButtonStyle.primary, custom_id="finish_work_button")
     async def finish_work(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(FinishModal(original_message=interaction.message, view_obj=self))
 
@@ -174,6 +176,8 @@ async def work(ctx):
 
 @bot.event
 async def on_ready():
+    # 註冊固定 custom_id 的按鈕 View，讓重啟後的按鈕依然有效
+    bot.add_view(AttendanceView())
     print(f'機器人已上線: {bot.user}')
     
     # 新增：機器人重新部署上線後，自動發送通知並 @ 你
