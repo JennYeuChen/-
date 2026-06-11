@@ -122,35 +122,39 @@ class SetupModal(discord.ui.Modal, title='發布今日剪輯任務'):
         # 記錄發出去的打卡面板訊息物件
         task_message = await interaction.channel.send(content=msg, embed=embed, view=attendance_view)
 
-        # 新增：每秒動態更新倒數時間的背景任務
-        async def countdown_task(msg_obj: discord.Message, view_obj: AttendanceView, role_obj, seconds_left: int):
-            while seconds_left > 0:
+        # 終極修正：改為每分鐘更新一次，徹底解決 Discord 阻斷交互的問題
+        async def countdown_task(msg_obj: discord.Message, view_obj: AttendanceView, role_obj, total_minutes: int):
+            minutes_left = total_minutes
+            
+            while minutes_left > 0:
                 if view_obj.is_finished:
-                    return  # 如果剪輯師中途按了完成，直接退出倒數
+                    return  # 如果剪輯師完成任務，立刻結束倒數
                 
-                await asyncio.sleep(1)
-                seconds_left -= 1
+                # 改成每 60 秒才 edit 一次訊息，不再每秒疲勞轟炸 Discord 伺服器
+                await asyncio.sleep(60)
+                minutes_left -= 1
                 
-                # 每秒計算分與秒，並更新 Embed 畫面
-                mins, secs = divmod(seconds_left, 60)
+                if view_obj.is_finished:
+                    return
+                
+                # 畫面顯示剩餘幾分鐘
                 countdown_embed = discord.Embed(
                     title="🎬 今日剪輯任務",
-                    description=f"請各位剪輯師開始打卡工作\n⏳ **本期任務限時倒數: {mins:02d}:{secs:02d}**",
+                    description=f"請各位剪輯師開始打卡工作\n⏳ **本期任務限時倒數: {minutes_left:02d}:00**",
                     color=discord.Color.blue()
                 )
                 try:
-                    # 關鍵修正：edit 的時候必須把 view=view_obj 帶上！否則按鈕的互動會失效
                     await msg_obj.edit(embed=countdown_embed, view=view_obj)
                 except Exception:
-                    break  # 防止訊息被意外刪除時噴錯
+                    break  # 防止訊息被刪除時噴錯
 
             # 倒數結束：若依然未完成則執行催促
             if not view_obj.is_finished:
                 mention_msg = f"⚠️ {role_obj.mention if role_obj else '@剪輯師'} 時間已到！任務逾時未完成，請儘速處理！"
                 await msg_obj.channel.send(mention_msg)
 
-        # 啟動非同步倒數
-        asyncio.create_task(countdown_task(task_message, attendance_view, role, total_seconds))
+        # 啟動非同步倒數（注意：這裡最後一個參數我們直接傳入的 minutes）
+        asyncio.create_task(countdown_task(task_message, attendance_view, role, minutes))
 
 # 老闆專用的啟動檢視按鈕
 class AdminSetupView(discord.ui.View):
