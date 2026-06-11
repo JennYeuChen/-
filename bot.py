@@ -137,7 +137,8 @@ class SetupModal(discord.ui.Modal, title='發布今日剪輯任務'):
                     color=discord.Color.blue()
                 )
                 try:
-                    await msg_obj.edit(embed=countdown_embed)
+                    # 關鍵修正：edit 的時候必須把 view=view_obj 帶上！否則按鈕的互動會失效
+                    await msg_obj.edit(embed=countdown_embed, view=view_obj)
                 except Exception:
                     break  # 防止訊息被意外刪除時噴錯
 
