@@ -69,9 +69,9 @@ class AttendanceView(discord.ui.View):
     def __init__(self, drive_link: str = ""):
         super().__init__(timeout=None)
         self.drive_link = drive_link  # 儲存老闆輸入的網址
-        self.is_finished = False      # 新增：用來記錄這項任務是不是完成了
+        self.is_finished = False      # 記錄這項任務是不是完成了
 
-    @discord.ui.button(label="開始剪輯", style=discord.ButtonStyle.green, custom_id="start_work")
+    @discord.ui.button(label="開始剪輯", style=discord.ButtonStyle.green) # 移除 custom_id
     async def start_work(self, interaction: discord.Interaction, button: discord.ui.Button):
         owner = await interaction.client.fetch_user(MY_USER_ID)
         await owner.send(f"🚀 **{interaction.user.display_name} 開始剪輯了！**")
@@ -79,16 +79,14 @@ class AttendanceView(discord.ui.View):
         msg = f"✅ 已通知老闆你開始工作了！\n📁 **今日素材雲端連結：** {self.drive_link}"
         await interaction.response.send_message(msg, ephemeral=True)
 
-    @discord.ui.button(label="完成任務", style=discord.ButtonStyle.primary, custom_id="finish_work")
+    @discord.ui.button(label="完成任務", style=discord.ButtonStyle.primary) # 移除 custom_id
     async def finish_work(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 新增：把 self（當前的 View 物件）也傳進 Modal，方便更新狀態
         await interaction.response.send_modal(FinishModal(original_message=interaction.message, view_obj=self))
 
 # 給老闆填寫素材網址與時間的彈出視窗
 class SetupModal(discord.ui.Modal, title='發布今日剪輯任務'):
     link = discord.ui.TextInput(label='請輸入今日素材雲端連結 1', style=discord.TextStyle.short, placeholder='https://drive.google.com/...', required=True)
-    # 新增：要求輸入限時分鐘數
-    time_limit = discord.ui.TextInput(label='請輸入限時時間（單位：分鐘）', style=discord.TextStyle.short, placeholder='例如: 120', required=True)
+    time_limit = discord.ui.TextInput(label='請輸入限時時間（單位：分鐘）', style=discord.TextStyle.short, placeholder='例如: 45', required=True)
 
     def __init__(self, setup_message: discord.Message):
         super().__init__(timeout=None)
@@ -102,31 +100,54 @@ class SetupModal(discord.ui.Modal, title='發布今日剪輯任務'):
         except Exception as e:
             print(f"刪除設定按鈕訊息失敗: {e}")
 
-        # 檢查輸入的時間是不是數字，如果不是就預設 60 分鐘
         try:
             minutes = int(self.time_limit.value)
         except ValueError:
             minutes = 60
 
+        total_seconds = minutes * 60  # 轉成總秒數
         role = interaction.guild.get_role(EDITOR_ROLE_ID)
-        # 在 description 順便加上限時提示，讓剪輯師知道
-        embed = discord.Embed(title="🎬 今日剪輯任務", description=f"請各位剪輯師開始打卡工作\n⏳ **本期任務限時: {minutes} 分鐘**", color=discord.Color.blue())
+        
+        # 初始 Embed 顯示
+        embed = discord.Embed(
+            title="🎬 今日剪輯任務",
+            description=f"請各位剪輯師開始打卡工作\n⏳ **本期任務限時倒數: {minutes:02d}:00**",
+            color=discord.Color.blue()
+        )
         msg = f"{role.mention if role else '未設定剪輯師身分組'}"
         
-        # 建立打卡 View
         attendance_view = AttendanceView(drive_link=self.link.value)
-        await interaction.channel.send(content=msg, embed=embed, view=attendance_view)
+        # 記錄發出去的打卡面板訊息物件
+        task_message = await interaction.channel.send(content=msg, embed=embed, view=attendance_view)
 
-        # 新增背景計時功能：時間到了自動檢查是否需要催促
-        async def check_timer(target_channel, role_obj, view: AttendanceView, delay_minutes: int):
-            await asyncio.sleep(delay_minutes * 60)  # 轉換成秒數並等待
-            # 如果時間到了，任務還沒被標記成完成，就發送催促訊息
-            if not view.is_finished:
-                mention_msg = f"⚠️ {role_obj.mention if role_obj else '@剪輯師'} 時間已經過了 {delay_minutes} 分鐘！請儘速完成任務並點擊完成回報！"
-                await target_channel.send(mention_msg)
+        # 新增：每秒動態更新倒數時間的背景任務
+        async def countdown_task(msg_obj: discord.Message, view_obj: AttendanceView, role_obj, seconds_left: int):
+            while seconds_left > 0:
+                if view_obj.is_finished:
+                    return  # 如果剪輯師中途按了完成，直接退出倒數
+                
+                await asyncio.sleep(1)
+                seconds_left -= 1
+                
+                # 每秒計算分與秒，並更新 Embed 畫面
+                mins, secs = divmod(seconds_left, 60)
+                countdown_embed = discord.Embed(
+                    title="🎬 今日剪輯任務",
+                    description=f"請各位剪輯師開始打卡工作\n⏳ **本期任務限時倒數: {mins:02d}:{secs:02d}**",
+                    color=discord.Color.blue()
+                )
+                try:
+                    await msg_obj.edit(embed=countdown_embed)
+                except Exception:
+                    break  # 防止訊息被意外刪除時噴錯
 
-        # 啟動背景非同步計時任務，不會卡住機器人當前的運作
-        asyncio.create_task(check_timer(interaction.channel, role, attendance_view, minutes))
+            # 倒數結束：若依然未完成則執行催促
+            if not view_obj.is_finished:
+                mention_msg = f"⚠️ {role_obj.mention if role_obj else '@剪輯師'} 時間已到！任務逾時未完成，請儘速處理！"
+                await msg_obj.channel.send(mention_msg)
+
+        # 啟動非同步倒數
+        asyncio.create_task(countdown_task(task_message, attendance_view, role, total_seconds))
 
 # 老闆專用的啟動檢視按鈕
 class AdminSetupView(discord.ui.View):
@@ -152,7 +173,7 @@ async def work(ctx):
 
 @bot.event
 async def on_ready():
-    bot.add_view(AttendanceView())  # 注意：這裡不要傳參數，保持預設空值
+    # 保持完全乾淨，不加載任何預設的空 View
     print(f'機器人已上線: {bot.user}')
 
 # 在機器人登入前先把虛擬網頁跑起來
