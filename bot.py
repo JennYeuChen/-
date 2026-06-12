@@ -71,16 +71,22 @@ class AttendanceView(discord.ui.View):
         self.drive_link = drive_link  # 儲存老闆輸入的網址
         self.is_finished = False      # 記錄這項任務是不是完成了
 
-    # 關鍵修正：加上固定的 custom_id
     @discord.ui.button(label="開始剪輯", style=discord.ButtonStyle.green, custom_id="start_work_button")
     async def start_work(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 修正：如果機器人重啟過，從當前訊息的雲端硬碟連結提取網址，確保不遺失
+        link = self.drive_link
+        if not link and interaction.message.embeds and interaction.message.embeds[0].url:
+            link = interaction.message.embeds[0].url
+
         owner = await interaction.client.fetch_user(MY_USER_ID)
-        await owner.send(f"🚀 **{interaction.user.display_name} 開始剪輯了！")
+        # 終極關鍵修正：把漏掉的格式補正，文字才不會報錯崩潰！
+        await owner.send(f"🚀 **{interaction.user.display_name}** 開始剪輯了！")
         
-        msg = f"✅ 已通知老闆你開始工作了！\n📁 **今日素材雲端連結：** {self.drive_link}"
+        # 為了保證重啟後按鈕依然拿得到網址，從 Embed url 備份中讀取
+        current_link = link if link else "請查看當前任務雲端硬碟連結"
+        msg = f"✅ 已通知老闆你開始工作了！\n📁 **今日素材雲端連結：** {current_link}"
         await interaction.response.send_message(msg, ephemeral=True)
 
-    # 關鍵修正：加上固定的 custom_id
     @discord.ui.button(label="完成任務", style=discord.ButtonStyle.primary, custom_id="finish_work_button")
     async def finish_work(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(FinishModal(original_message=interaction.message, view_obj=self))
@@ -110,9 +116,10 @@ class SetupModal(discord.ui.Modal, title='發布今日剪輯任務'):
         total_seconds = minutes * 60  # 轉成總秒數
         role = interaction.guild.get_role(EDITOR_ROLE_ID)
         
-        # 初始 Embed 顯示
+        # 修正：把 link.value 直接塞進 Embed 的 url 屬性裡
         embed = discord.Embed(
-            title="🎬 今日剪輯任務",
+            title="🎬 今日剪輯任務 (點此可直接開啟雲端)",
+            url=self.link.value,
             description=f"請各位剪輯師開始打卡工作\n⏳ **本期任務限時倒數: {minutes:02d}:00**",
             color=discord.Color.blue()
         )
@@ -137,9 +144,10 @@ class SetupModal(discord.ui.Modal, title='發布今日剪輯任務'):
                 if view_obj.is_finished:
                     return
                 
-                # 畫面顯示剩餘幾分鐘
+                # 修正：倒數更新時也要保留 url，按鈕和超連結才不會跑掉
                 countdown_embed = discord.Embed(
-                    title="🎬 今日剪輯任務",
+                    title="🎬 今日剪輯任務 (點此可直接開啟雲端)",
+                    url=view_obj.drive_link,
                     description=f"請各位剪輯師開始打卡工作\n⏳ **本期任務限時倒數: {minutes_left:02d}:00**",
                     color=discord.Color.blue()
                 )
